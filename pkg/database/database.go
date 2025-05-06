@@ -94,31 +94,18 @@ type FileInfo struct {
 	Name     string
 }
 
-type ScanState struct {
-	Systems    []System
-	SystemIDs  map[string]int
-	Titles     []MediaTitle
-	TitleIDs   map[string]int
-	Media      []Media
-	MediaIDs   map[string]int // Path
-	TagTypes   []TagType
-	TagTypeIDs map[string]int
-	Tags       []Tag
-	TagIDs     map[string]int
-	MediaTags  []MediaTag
-}
-
 /*
  * Interfaces for external deps
  */
 
 type GenericDBI interface {
 	Open() error
-	UnsafeGetSqlDb() *sql.DB
+	UnsafeGetSqlDB() *sql.DB
 	Truncate() error
 	Allocate() error
 	Vacuum() error
 	Close() error
+	GetDBPath() string
 }
 
 type UserDBI interface {
@@ -135,12 +122,41 @@ type UserDBI interface {
 
 type MediaDBI interface {
 	GenericDBI
+	OpenTempMediaDB() (MediaDBI, error)
+	CloseTempMediaDB() error
+	BeginTransaction() error
+	CommitTransaction() error
+	CleanInactiveMedia() error
 	Exists() bool
-	ReindexFromScanState(ss *ScanState) error
+
 	SearchMediaPathExact(systems []systemdefs.System, query string) ([]SearchResult, error)
 	SearchMediaPathWords(systems []systemdefs.System, query string) ([]SearchResult, error)
 	SearchMediaPathGlob(systems []systemdefs.System, query string) ([]SearchResult, error)
 	IndexedSystems() ([]string, error)
 	SystemIndexed(system systemdefs.System) bool
 	RandomGame(systems []systemdefs.System) (SearchResult, error)
+
+	FindSystem(row System) (System, error)
+	InsertSystem(row System) (System, error)
+	FindOrInsertSystem(row System) (System, error)
+
+	FindMediaTitle(row MediaTitle) (MediaTitle, error)
+	InsertMediaTitle(row MediaTitle) (MediaTitle, error)
+	FindOrInsertMediaTitle(row MediaTitle) (MediaTitle, error)
+
+	FindMedia(row Media) (Media, error)
+	InsertMedia(row Media) (Media, error)
+	FindOrInsertMedia(row Media) (Media, error)
+
+	FindTagType(row TagType) (TagType, error)
+	InsertTagType(row TagType) (TagType, error)
+	FindOrInsertTagType(row TagType) (TagType, error)
+
+	FindTag(row Tag) (Tag, error)
+	InsertTag(row Tag) (Tag, error)
+	FindOrInsertTag(row Tag) (Tag, error)
+
+	FindMediaTag(row MediaTag) (MediaTag, error)
+	InsertMediaTag(row MediaTag) (MediaTag, error)
+	FindOrInsertMediaTag(row MediaTag) (MediaTag, error)
 }

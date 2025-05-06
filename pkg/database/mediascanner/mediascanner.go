@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ZaparooProject/zaparoo-core/pkg/config"
 	"github.com/ZaparooProject/zaparoo-core/pkg/database"
@@ -297,26 +298,18 @@ func NewNamesIndex(
 	fdb *database.Database,
 	update func(IndexStatus),
 ) (int, error) {
-	db := fdb.MediaDB
+	mdb := fdb.MediaDB
+	tdb, err := fdb.MediaDB.OpenTempMediaDB()
+	if err != nil {
+		log.Error().Err(err).Msgf("Error opening Temp MediaDB from existing path")
+		return 0, err
+	}
 	status := IndexStatus{
 		Total: len(systems) + 2, // estimate steps
 		Step:  1,
 	}
 
-	scanState := database.ScanState{
-		Systems:    make([]database.System, 1),
-		SystemIDs:  make(map[string]int),
-		Titles:     make([]database.MediaTitle, 1),
-		TitleIDs:   make(map[string]int),
-		Media:      make([]database.Media, 1),
-		MediaIDs:   make(map[string]int),
-		TagTypes:   make([]database.TagType, 1),
-		TagTypeIDs: make(map[string]int),
-		Tags:       make([]database.Tag, 1),
-		TagIDs:     make(map[string]int),
-		MediaTags:  make([]database.MediaTag, 1),
-	}
-	SeedKnownTags(&scanState)
+	SeedKnownTags(tdb)
 
 	filteredIds := make([]string, 0)
 	for _, s := range systems {
@@ -381,8 +374,22 @@ func NewNamesIndex(
 		log.Debug().Msgf("scanned %d files for system: %s", len(files), systemId)
 		scanned[systemId] = true
 
-		for _, p := range files {
-			AddMediaPath(&scanState, systemId, p.Path)
+		system, err := tdb.FindOrInsertSystem(database.System{
+			SystemID: systemId,
+			Name:     systemId,
+		})
+		if err == nil {
+			for _, p := range files {
+				start := time.Now()
+				err := AddMediaPath(tdb, system.DBID, p.Path)
+				log.Debug().Msgf("Media Insert took %v", time.Now().Sub(start))
+
+				if err != nil {
+					log.Error().Err(err).Msgf("error running %s scanner for system path: %s, %s", systemId, systemId, p.Path)
+				}
+			}
+		} else {
+			log.Error().Err(err).Msgf("error running %s scanner for system: %s", systemId, systemId)
 		}
 	}
 
@@ -404,8 +411,19 @@ func NewNamesIndex(
 			scanned[systemId] = true
 
 			if len(results) > 0 {
-				for _, p := range results {
-					AddMediaPath(&scanState, systemId, p.Path)
+				system, err := tdb.FindOrInsertSystem(database.System{
+					SystemID: systemId,
+					Name:     systemId,
+				})
+				if err == nil {
+					for _, p := range results {
+						err := AddMediaPath(tdb, system.DBID, p.Path)
+						if err != nil {
+							log.Error().Err(err).Msgf("error running %s scanner for system path: %s, %s", l.Id, systemId, p.Path)
+						}
+					}
+				} else {
+					log.Error().Err(err).Msgf("error running %s scanner for system: %s", l.Id, systemId)
 				}
 			}
 		}
@@ -433,11 +451,22 @@ func NewNamesIndex(
 			if len(results) > 0 {
 				status.Files += len(results)
 				scanned[s.ID] = true
-				systemId := s.ID
 
-				for _, p := range results {
-					AddMediaPath(&scanState, systemId, p.Path)
+				system, err := tdb.FindOrInsertSystem(database.System{
+					SystemID: s.ID,
+					Name:     s.ID,
+				})
+				if err == nil {
+					for _, p := range results {
+						err := AddMediaPath(tdb, system.DBID, p.Path)
+						if err != nil {
+							log.Error().Err(err).Msgf("error running %s scanner for system path: %s, %s", l.Id, s.ID, p.Path)
+						}
+					}
+				} else {
+					log.Error().Err(err).Msgf("error running %s scanner for system: %s", l.Id, s.ID)
 				}
+
 			}
 		}
 	}
@@ -446,9 +475,34 @@ func NewNamesIndex(
 	status.SystemId = ""
 	update(status)
 
-	err := db.ReindexFromScanState(&scanState)
+	// Clean inactive
+	err = tdb.CleanInactiveMedia()
 	if err != nil {
-		log.Error().Err(err).Msg("MediaDB sqlite bulk insert failed")
+		log.Error().Err(err).Msgf("error cleaning inactive media from temp MediaDB")
+	}
+
+	// Attempt Temp->Disk DB swap
+	log.Debug().Msgf("Performing MediaDB Temp->Disk swap")
+	err = mdb.Close()
+	if err != nil {
+		log.Error().Err(err).Msgf("error closing existing MediaDB for temp swap")
+		return 0, err
+	}
+	err = os.Remove(mdb.GetDBPath())
+	if err != nil {
+		log.Error().Err(err).Msgf("error removing existing DB file for swap")
+		mdb.Open()
+		return 0, err
+	}
+
+	err = tdb.CloseTempMediaDB()
+	if err != nil {
+		log.Error().Err(err).Msgf("Error flushing temp MediaDB to disk, reopening as is")
+	}
+	err = mdb.Open()
+	if err != nil {
+		log.Error().Err(err).Msgf("Error reopenning MediaDB after scan")
+		return 0, err
 	}
 
 	indexedSystems := make([]string, 0)

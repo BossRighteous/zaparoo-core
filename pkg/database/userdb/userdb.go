@@ -6,37 +6,34 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ZaparooProject/zaparoo-core/pkg/config"
 	"github.com/ZaparooProject/zaparoo-core/pkg/database"
-	"github.com/ZaparooProject/zaparoo-core/pkg/platforms"
 	_ "modernc.org/sqlite"
 )
 
 var ErrorNullSql = errors.New("UserDB is not connected")
 
 type UserDB struct {
-	sql *sql.DB
-	pl  platforms.Platform
+	sql    *sql.DB
+	dbPath string
 }
 
-func OpenUserDB(pl platforms.Platform) (*UserDB, error) {
-	db := &UserDB{sql: nil, pl: pl}
+func OpenUserDB(dbPath string) (*UserDB, error) {
+	db := &UserDB{sql: nil, dbPath: dbPath}
 	err := db.Open()
 	return db, err
 }
 
 func (db *UserDB) Open() error {
 	exists := true
-	dbPath := filepath.Join(db.pl.DataDir(), config.UserDbFile)
-	_, err := os.Stat(dbPath)
+	_, err := os.Stat(db.dbPath)
 	if err != nil {
 		exists = false
-		err := os.MkdirAll(filepath.Dir(dbPath), 0755)
-		if err != nil {
-			return err
-		}
+		os.MkdirAll(filepath.Dir(db.dbPath), 0755)
+		//if err != nil {
+		//	return err
+		//}
 	}
-	sql, err := sql.Open("sqlite", dbPath)
+	sql, err := sql.Open("sqlite", db.dbPath)
 	if err != nil {
 		return err
 	}
@@ -47,7 +44,11 @@ func (db *UserDB) Open() error {
 	return nil
 }
 
-func (db *UserDB) UnsafeGetSqlDb() *sql.DB {
+func (db *UserDB) GetDBPath() string {
+	return db.dbPath
+}
+
+func (db *UserDB) UnsafeGetSqlDB() *sql.DB {
 	return db.sql
 }
 

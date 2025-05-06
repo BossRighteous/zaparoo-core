@@ -248,15 +248,20 @@ func makeDatabase(pl platforms.Platform) (*database.Database, error) {
 		MediaDB: nil,
 		UserDB:  nil,
 	}
-	mediaDB, err := mediadb.OpenMediaDB(pl)
+
+	mdbPath := filepath.Join(pl.DataDir(), config.MediaDbFile)
+	mediaDB, err := mediadb.OpenMediaDB(fmt.Sprintf("file:%s?cache=shared", mdbPath))
 	if err != nil {
 		return db, err
 	}
 	db.MediaDB = mediaDB
-	userDB, err := userdb.OpenUserDB(pl)
+
+	udbPath := filepath.Join(pl.DataDir(), config.UserDbFile)
+	userDB, err := userdb.OpenUserDB(udbPath)
 	if err != nil {
 		return db, err
 	}
+
 	db.UserDB = userDB
 	return db, nil
 }
